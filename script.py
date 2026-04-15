@@ -1,100 +1,132 @@
-print("🚀 SCRIPT STARTED")
-import requests
-import os
-import random
-import time
-print("SCRIPT STARTED")
-AFFILIATE_LINK = "https://www.checkout-ds24.com/redir/533733/snow002023/"
-HISTORY_FILE = "used_topics.txt"
-FIRST_RUN_FILE = "first_run_done.txt"
+name: AI Dental Blog Automation
 
-topics = [
-    "how to whiten teeth naturally at home",
-    "best probiotics for dental health",
-    "how to prevent gum disease naturally",
-    "how to stop bad breath permanently",
-    "best foods for strong teeth and gums"
-]
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
 
-def is_first_run():
-    return not os.path.exists(FIRST_RUN_FILE)
+jobs:
+  post:
+    runs-on: ubuntu-latest
 
-def mark_first_run_done():
-    with open(FIRST_RUN_FILE, "w") as f:
-        f.write("done")
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-def load_used():
-    if not os.path.exists(HISTORY_FILE):
-        return []
-    return open(HISTORY_FILE).read().splitlines()
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
-def save_topic(topic):
-    with open(HISTORY_FILE, "a") as f:
-        f.write(topic + "\n")
+      - name: Install Dependencies
+        run: |
+          pip install requests
 
-def retry(func, tries=3):
-    for i in range(tries):
-        try:
-            return func()
-        except Exception as e:
-            print(e)
-            time.sleep(2)
-    return None
+      - name: Generate & Post Article
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BLOGGER_CLIENT_ID: ${{ secrets.BLOGGER_CLIENT_ID }}
+          BLOGGER_CLIENT_SECRET: ${{ secrets.BLOGGER_CLIENT_SECRET }}
+          BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
+          BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
+          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
 
-def get_token():
-    def req():
-        return requests.post(
-            "https://oauth2.googleapis.com/token",
-            data={
-                "client_id": os.environ["BLOGGER_CLIENT_ID"],
-                "client_secret": os.environ["BLOGGER_CLIENT_SECRET"],
-                "refresh_token": os.environ["BLOGGER_REFRESH_TOKEN"],
-                "grant_type": "refresh_token"
-            }
-        ).json()
+        run: |
+          python3 << 'EOF'
+          import requests
+          import os
+          import random
+          import sys
+          import json
 
-    data = retry(req)
-    return data.get("access_token")
+          # 1. إعدادات المحتوى
+          AFFILIATE_LINK = "https://www.checkout-ds24.com/redir/533733/snow002023/"
+          topics = [
+              "how to whiten teeth naturally at home",
+              "best probiotics for dental health",
+              "how to prevent gum disease naturally",
+              "how to stop bad breath permanently",
+              "best foods for strong teeth and gums",
+              "natural ways to strengthen tooth enamel"
+          ]
+          topic = random.choice(topics)
 
-def generate(topic):
-    def req():
-        return requests.post(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
-            params={"key": os.environ["GEMINI_API_KEY"]},
-            json={
-                "contents": [{"parts": [{"text": f"Write SEO HTML article about {topic}"}]}]
-            }
-        ).json()
+          # 2. الحصول على توكن الوصول (Access Token)
+          token_res = requests.post(
+              "https://oauth2.googleapis.com/token",
+              data={
+                  "client_id": os.environ["BLOGGER_CLIENT_ID"],
+                  "client_secret": os.environ["BLOGGER_CLIENT_SECRET"],
+                  "refresh_token": os.environ["BLOGGER_REFRESH_TOKEN"],
+                  "grant_type": "refresh_token"
+              }
+          )
+          
+          access_token = token_res.json().get("access_token")
+          if not access_token:
+              print(f"❌ Failed to refresh token: {token_res.text}")
+              sys.exit(1)
 
-    data = retry(req)
-    if not data or "candidates" not in data:
-        return "<h1>Error</h1>"
-    return data["candidates"][0]["content"]["parts"][0]["text"]
+          # 3. جلب صورة من Unsplash
+          image_url = "https://images.unsplash.com/photo-1588776814546-1ffcf47267a5" # صورة افتراضية
+          try:
+              res = requests.get(
+                  "https://api.unsplash.com/search/photos",
+                  params={"query": "dental care teeth", "per_page": 5},
+                  headers={"Authorization": f"Client-ID {os.environ['UNSPLASH_ACCESS_KEY']}"}
+              )
+              if res.status_code == 200:
+                  image_url = random.choice(res.json()["results"])["urls"]["regular"]
+          except:
+              pass
 
-def post(token, title, content):
-    return requests.post(
-        f"https://www.googleapis.com/blogger/v3/blogs/{os.environ['BLOGGER_BLOG_ID']}/posts/",
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        json={"title": title, "content": content}
-    )
+          # 4. توليد المحتوى عبر Gemini
+          prompt = f"Write a detailed blog post about {topic} in HTML. Use H1 for title, H2 for sections. No markdown, no ``` tags. Include FAQ."
+          gemini_url = f"[https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=](https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=){os.environ['GEMINI_API_KEY']}"
+          
+          gemini_res = requests.post(gemini_url, json={"contents": [{"parts": [{"text": prompt}]}]})
+          
+          try:
+              content = gemini_res.json()['candidates'][0]['content']['parts'][0]['text']
+              # تنظيف صارم للمخرجات
+              content = content.replace("```html", "").replace("```", "").strip()
+          except Exception as e:
+              print(f"❌ Gemini Error: {e}")
+              sys.exit(1)
 
-used = load_used()
-available = [t for t in topics if t not in used] or topics
+          # 5. بناء هيكل المقال النهائي
+          full_html = f"""
+          <div style="text-align:center;"><img src="{image_url}" style="width:100%;max-width:800px;border-radius:15px;"/></div>
+          {content}
+          <div style="background:#f0f7ff;padding:20px;border-radius:10px;text-align:center;margin-top:30px;">
+              <h3>🦷 Expert Recommendation</h3>
+              <p>For better results, check out our recommended solution.</p>
+              <a href="{AFFILIATE_LINK}" style="background:#007BFF;color:white;padding:12px 25px;text-decoration:none;border-radius:5px;display:inline-block;">Learn More Here</a>
+          </div>
+          """
 
-token = get_token()
+          # 6. النشر الفعلي في Blogger (مع إضافة معامل النشر المباشر)
+          blog_id = os.environ["BLOGGER_BLOG_ID"]
+          post_url = f"[https://www.googleapis.com/blogger/v3/blogs/](https://www.googleapis.com/blogger/v3/blogs/){blog_id}/posts/"
+          
+          payload = {
+              "kind": "blogger#post",
+              "blog": {"id": blog_id},
+              "title": topic.capitalize() + " (Full Guide 2026)",
+              "content": full_html
+          }
 
-if is_first_run():
-    print("FIRST RUN")
-    mark_first_run_done()
+          # استخدمنا ?isDraft=false لضمان ظهور المقال فوراً
+          publish_res = requests.post(
+              f"{post_url}?isDraft=false",
+              headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+              data=json.dumps(payload)
+          )
 
-topic = random.choice(available)
-content = generate(topic)
-
-res = post(token, topic, content)
-
-if res.status_code == 200:
-    print("Posted")
-    save_topic(topic)
-else:
-    print(res.text)
-print("SCRIPT FINISHED")
+          if publish_res.status_code in [200, 201]:
+              print(f"✅ SUCCESS! Article published: {payload['title']}")
+          else:
+              print(f"❌ FAILURE! Status Code: {publish_res.status_code}")
+              print(f"Blogger Response: {publish_res.text}")
+              sys.exit(1)
+          EOF
