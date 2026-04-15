@@ -2,7 +2,7 @@ import requests
 import os
 import random
 import time
-
+print("SCRIPT STARTED")
 AFFILIATE_LINK = "https://www.checkout-ds24.com/redir/533733/snow002023/"
 HISTORY_FILE = "used_topics.txt"
 FIRST_RUN_FILE = "first_run_done.txt"
@@ -96,3 +96,4 @@ if res.status_code == 200:
     save_topic(topic)
 else:
     print(res.text)
+print("SCRIPT FINISHED")
