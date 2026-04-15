@@ -2,25 +2,23 @@ name: AI Dental Blog Automation
 
 on:
   schedule:
-    - cron: '0 9 * * *'
+    - cron: '0 9 * * *'   # مرة يومياً
   workflow_dispatch:
 
 jobs:
   post:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-
       - name: Install Dependencies
-        run: pip install requests
+        run: |
+          pip install requests
 
-      - name: Run Script
+      - name: Generate & Post Article
+        continue-on-error: true
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           BLOGGER_CLIENT_ID: ${{ secrets.BLOGGER_CLIENT_ID }}
@@ -28,4 +26,194 @@ jobs:
           BLOGGER_REFRESH_TOKEN: ${{ secrets.BLOGGER_REFRESH_TOKEN }}
           BLOGGER_BLOG_ID: ${{ secrets.BLOGGER_BLOG_ID }}
           UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
-        run: python script.py
+
+        run: |
+          python3 << 'EOF'
+          import requests
+          import os
+          import random
+          import sys
+          import json
+
+          AFFILIATE_LINK = "https://www.checkout-ds24.com/redir/533733/snow002023/"
+
+          topics = [
+              "how to whiten teeth naturally at home",
+              "best probiotics for dental health",
+              "how to prevent gum disease naturally",
+              "how to stop bad breath permanently",
+              "best foods for strong teeth and gums",
+              "natural ways to strengthen tooth enamel"
+          ]
+
+          topic = random.choice(topics)
+
+          # ---------------------------
+          # GET BLOGGER ACCESS TOKEN
+          # ---------------------------
+          try:
+              token_res = requests.post(
+                  "https://oauth2.googleapis.com/token",
+                  data={
+                      "client_id": os.environ["BLOGGER_CLIENT_ID"],
+                      "client_secret": os.environ["BLOGGER_CLIENT_SECRET"],
+                      "refresh_token": os.environ["BLOGGER_REFRESH_TOKEN"],
+                      "grant_type": "refresh_token"
+                  },
+                  timeout=30
+              )
+              token_res.raise_for_status()
+
+              token_json = token_res.json()
+
+              if "access_token" not in token_json:
+                  print("Error getting access token - missing access_token in response")
+                  print("Response:", json.dumps(token_json, indent=2))
+                  sys.exit(1)
+
+              access_token = token_json["access_token"]
+              print("Access token obtained successfully")
+
+          except requests.exceptions.RequestException as e:
+              print(f"Error getting access token: {e}")
+              sys.exit(1)
+
+          # ---------------------------
+          # GET IMAGE FROM UNSPLASH
+          # ---------------------------
+          image_url = ""
+
+          try:
+              res = requests.get(
+                  "https://api.unsplash.com/search/photos",
+                  params={
+                      "query": "teeth smile dental",
+                      "per_page": 10
+                  },
+                  headers={
+                      "Authorization": f"Bearer {os.environ['UNSPLASH_ACCESS_KEY']}"
+                  },
+                  timeout=30
+              )
+              res.raise_for_status()
+
+              photos = res.json().get("results", [])
+
+              if photos:
+                  image_url = random.choice(photos)["urls"]["regular"]
+                  print(f"Image selected: {image_url}")
+              else:
+                  print("No images found on Unsplash")
+
+          except requests.exceptions.RequestException as e:
+              print(f"Error getting image from Unsplash: {e}")
+
+          # ---------------------------
+          # GENERATE ARTICLE
+          # ---------------------------
+          prompt = f"""
+          Write a HIGH-QUALITY, UNIQUE, SEO-optimized blog post about: {topic}
+
+          Rules:
+          - Create a powerful viral title (H1)
+          - Add meta description (max 160 chars)
+          - Hook reader in first paragraph
+          - Use storytelling + emotional triggers
+          - Include 5-7 sections (H2)
+          - Use bullet points where needed
+          - Make content 100% unique and human-like
+          - Add FAQ section
+          - Add soft promotion for ProDentim (NOT spammy)
+          - End with strong CTA
+
+          Output ONLY clean HTML.
+          """
+
+          try:
+              gemini_res = requests.post(
+                  f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={os.environ['GEMINI_API_KEY']}",
+                  json={
+                      "contents": [
+                          {"parts": [{"text": prompt}]}
+                      ]
+                  },
+                  timeout=60
+              )
+              gemini_res.raise_for_status()
+
+              gemini_json = gemini_res.json()
+
+              if "candidates" not in gemini_json:
+                  print("Error generating content - no candidates in response")
+                  print("Response:", json.dumps(gemini_json, indent=2))
+                  sys.exit(1)
+
+              content = gemini_json["candidates"][0]["content"]["parts"][0]["text"]
+              print("Article generated successfully")
+
+          except requests.exceptions.RequestException as e:
+              print(f"Error calling Gemini API: {e}")
+              sys.exit(1)
+          except (KeyError, IndexError) as e:
+              print(f"Error parsing Gemini response: {e}")
+              print("Response:", json.dumps(gemini_json, indent=2))
+              sys.exit(1)
+
+          # ---------------------------
+          # FINAL CONTENT
+          # ---------------------------
+          full_content = f"""
+          <div style="text-align:center;">
+              <img src="{image_url}" style="width:100%;max-width:800px;border-radius:12px;" alt="Dental Health" />
+          </div>
+
+          {content}
+
+          <div style="margin-top:40px;padding:25px;border-radius:12px;background:#f5faff;text-align:center;">
+              <h3>Recommended Solution</h3>
+              <p>Looking for a natural way to improve your oral health? Many people are now using advanced probiotics to support their teeth and gums.</p>
+
+              <a href="{AFFILIATE_LINK}"
+              style="display:inline-block;margin-top:15px;padding:14px 28px;background:#007BFF;color:#fff;
+              text-decoration:none;border-radius:8px;font-size:18px;">
+              Discover the Solution Now
+              </a>
+          </div>
+          """
+
+          title = topic.capitalize() + " (Complete Guide 2026)"
+
+          # ---------------------------
+          # POST TO BLOGGER
+          # ---------------------------
+          try:
+              post_res = requests.post(
+                  f"https://www.googleapis.com/blogger/v3/blogs/{os.environ['BLOGGER_BLOG_ID']}/posts/",
+                  headers={
+                      "Authorization": f"Bearer {access_token}",
+                      "Content-Type": "application/json"
+                  },
+                  json={
+                      "title": title,
+                      "content": full_content
+                  },
+                  timeout=30
+              )
+
+              if post_res.status_code == 200:
+                  post_json = post_res.json()
+                  print(f"Posted successfully!")
+                  print(f"   Title: {title}")
+                  print(f"   Post URL: {post_json.get('url', 'N/A')}")
+                  print(f"   Status Code: {post_res.status_code}")
+              else:
+                  print(f"Failed to post article")
+                  print(f"   Status Code: {post_res.status_code}")
+                  print(f"   Response: {post_res.text}")
+                  sys.exit(1)
+
+          except requests.exceptions.RequestException as e:
+              print(f"Error posting to Blogger: {e}")
+              sys.exit(1)
+
+          EOF
