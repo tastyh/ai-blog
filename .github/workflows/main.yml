@@ -2,7 +2,7 @@ name: AI Dental Blog Automation
 
 on:
   schedule:
-    - cron: '0 9 * * *'   # مرة يومياً
+    - cron: '0 9 * * *'
   workflow_dispatch:
 
 jobs:
@@ -52,9 +52,10 @@ jobs:
           # GET BLOGGER ACCESS TOKEN
           # ---------------------------
           try:
+              # ✅ الإصلاح: استخدام json= بدلاً من data=
               token_res = requests.post(
                   "https://oauth2.googleapis.com/token",
-                  data={
+                  json={                          # ← هذا هو الإصلاح!
                       "client_id": os.environ["BLOGGER_CLIENT_ID"],
                       "client_secret": os.environ["BLOGGER_CLIENT_SECRET"],
                       "refresh_token": os.environ["BLOGGER_REFRESH_TOKEN"],
