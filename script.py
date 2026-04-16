@@ -26,6 +26,9 @@ token_res = requests.post(
         "grant_type": "refresh_token"
     }
 )
+print(f"Client ID starts with: {os.environ['BLOGGER_CLIENT_ID'][:10]}...")
+print(f"Refresh token starts with: {os.environ['BLOGGER_REFRESH_TOKEN'][:10]}...")
+print(f"Token response: {token_res.text}")
 access_token = token_res.json().get("access_token")
 if not access_token:
     print(f"❌ Failed to refresh token: {token_res.text}")
